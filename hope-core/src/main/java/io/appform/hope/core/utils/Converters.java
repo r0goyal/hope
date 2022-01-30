@@ -210,7 +210,7 @@ public class Converters {
             @Override
             public List<Value> visit(JsonPathValue jsonPathValue) {
                 final JsonNode value = evaluationContext.getJsonContext()
-                        .read(jsonPathValue.getPath());
+                        .at(toJsonPointer(jsonPathValue.getPath()));
                 if(null == value || value.isNull() || value.isMissingNode()){
                     return errorHandlingStrategy.handleMissingValue(
                             jsonPathValue.getPath(),
@@ -487,7 +487,7 @@ public class Converters {
         final JsonNode value;
         if (null == existing) {
             value = evaluationContext.getJsonContext()
-                    .read(path);
+                    .at(toJsonPointer(path));
             if(null == value) {
                 jsonPathEvalCache.put(path, NullNode.getInstance());
             }
@@ -532,6 +532,20 @@ public class Converters {
                 .stream()
                 .map(value -> objectValue(evaluationContext, value, defaultValue))
                 .collect(Collectors.toList());
+    }
+
+
+    public static String toJsonPointer(final String jsonPath) {
+        if (jsonPath == null || jsonPath.trim().isEmpty()) {
+            return jsonPath;
+        }
+
+        if (jsonPath.trim().startsWith("/")) {
+            return jsonPath;
+        }
+
+        return jsonPath.trim().replaceAll("\\.", "/")
+                .replace("$", "");
     }
 
 }
