@@ -48,4 +48,8 @@ public class JsonPathValue extends FunctionEvaluatableValue {
         return visitor.visit(this);
     }
 
+    @Override
+    public String string() {
+        return path;
+    }
 }

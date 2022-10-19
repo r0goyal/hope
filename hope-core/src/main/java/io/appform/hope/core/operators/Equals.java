@@ -30,9 +30,12 @@ import lombok.ToString;
 @ToString(callSuper = true)
 public class Equals extends BinaryOperator<Value> {
 
+    private final String string;
+
     @Builder
     public Equals(Value lhs, Value rhs) {
         super(lhs, rhs);
+        this.string = lhs.string() + "==" + rhs.string();
     }
 
     @Override
@@ -40,4 +43,8 @@ public class Equals extends BinaryOperator<Value> {
         return visitor.visit(this);
     }
 
+    @Override
+    public String string() {
+        return string;
+    }
 }

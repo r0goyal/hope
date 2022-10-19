@@ -18,4 +18,9 @@ package io.appform.hope.core;
  * Abstraction for a value type
  */
 public abstract class Value extends TreeNode {
+
+    public String string() {
+        return null;
+    }
+
 }
