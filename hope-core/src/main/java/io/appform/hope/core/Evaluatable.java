@@ -18,4 +18,9 @@ package io.appform.hope.core;
  * Abstraction for core expression that can be evaluated as a hope rule
  */
 public abstract class Evaluatable extends TreeNode {
+
+    public String string() {
+        return null;
+    }
+
 }

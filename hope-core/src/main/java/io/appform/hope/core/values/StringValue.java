@@ -60,4 +60,8 @@ public class StringValue extends EvaluatableValue<String> {
         return visitor.visit(this);
     }
 
+    @Override
+    public String string() {
+        return getValue();
+    }
 }
