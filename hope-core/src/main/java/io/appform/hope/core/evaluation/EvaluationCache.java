@@ -1,6 +1,5 @@
 package io.appform.hope.core.evaluation;
 
-import io.appform.hope.core.Evaluatable;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -14,16 +13,16 @@ import java.util.Optional;
 @NoArgsConstructor
 public class EvaluationCache {
 
-    private final Map<String, EvaluationResult> evaluationResultMap = new HashMap<>();
+    private final Map<String, Boolean> evaluationResultMap = new HashMap<>();
 
     public final static EvaluationCache EMPTY_CACHE = new EvaluationCache();
 
     public void add(final String evaluatable,
-                    final EvaluationResult evaluationResult) {
+                    final Boolean evaluationResult) {
         evaluationResultMap.put(evaluatable, evaluationResult);
     }
 
-    public Optional<EvaluationResult> get(final String evaluatable) {
+    public Optional<Boolean> get(final String evaluatable) {
         return Optional.ofNullable(evaluationResultMap.get(evaluatable));
     }
 

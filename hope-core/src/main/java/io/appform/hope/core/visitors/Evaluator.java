@@ -25,7 +25,6 @@ import io.appform.hope.core.VisitorAdapter;
 import io.appform.hope.core.combiners.AndCombiner;
 import io.appform.hope.core.combiners.OrCombiner;
 import io.appform.hope.core.evaluation.EvaluationCache;
-import io.appform.hope.core.evaluation.EvaluationResult;
 import io.appform.hope.core.exceptions.errorstrategy.DefaultErrorHandlingStrategy;
 import io.appform.hope.core.exceptions.errorstrategy.ErrorHandlingStrategy;
 import io.appform.hope.core.operators.And;
@@ -98,10 +97,7 @@ public class Evaluator {
         val evaluationCache = new EvaluationCache();
         tokens.forEach((key, evaluatable) -> {
             boolean result = evaluate(evaluatable, node);
-            evaluationCache.add(key,
-                    EvaluationResult.builder()
-                            .matched(result)
-                            .build());
+            evaluationCache.add(key, result);
         });
         return evaluatables.stream()
                 .map(evaluatable -> evaluate(evaluatable, node, evaluationCache))
@@ -162,7 +158,7 @@ public class Evaluator {
 
             @Override
             public Void visit(NotEquals notEquals) {
-//                tokens.put(notEquals.toString(), notEquals);
+                tokens.put(notEquals.string(), notEquals);
                 return null;
             }
 
@@ -266,7 +262,7 @@ public class Evaluator {
         public Boolean visit(Equals equals) {
             val evaluationResult = evaluationCache.get(equals.string()).orElse(null);
             if (evaluationResult != null){
-                return evaluationResult.isMatched();
+                return evaluationResult;
             }
             final Object lhs = Converters.objectValue(evaluationContext, equals.getLhs(), null);
             final Object rhs = Converters.objectValue(evaluationContext, equals.getRhs(), null);
@@ -275,9 +271,9 @@ public class Evaluator {
 
         @Override
         public Boolean visit(NotEquals notEquals) {
-            val evaluationResult = evaluationCache.get(notEquals.toString()).orElse(null);
+            val evaluationResult = evaluationCache.get(notEquals.string()).orElse(null);
             if (evaluationResult != null){
-                return evaluationResult.isMatched();
+                return evaluationResult;
             }
             final Object lhs = Converters.objectValue(evaluationContext, notEquals.getLhs(), null);
             final Object rhs = Converters.objectValue(evaluationContext, notEquals.getRhs(), null);
@@ -286,10 +282,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(Greater greater) {
-            val evaluationResult = evaluationCache.get(greater.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             final Number lhs = Converters.numericValue(evaluationContext, greater.getLhs(), 0);
             final Number rhs = Converters.numericValue(evaluationContext, greater.getRhs(), 0);
             return lhs.doubleValue() > rhs.doubleValue();
@@ -297,10 +289,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(GreaterEquals greaterEquals) {
-            val evaluationResult = evaluationCache.get(greaterEquals.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             final Number lhs = Converters.numericValue(evaluationContext, greaterEquals.getLhs(), 0);
             final Number rhs = Converters.numericValue(evaluationContext, greaterEquals.getRhs(), 0);
             return lhs.doubleValue() >= rhs.doubleValue();
@@ -308,10 +296,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(Lesser lesser) {
-            val evaluationResult = evaluationCache.get(lesser.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             final Number lhs = Converters.numericValue(evaluationContext, lesser.getLhs(), 0);
             final Number rhs = Converters.numericValue(evaluationContext, lesser.getRhs(), 0);
             return lhs.doubleValue() < rhs.doubleValue();
@@ -319,10 +303,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(LesserEquals lesserEquals) {
-            val evaluationResult = evaluationCache.get(lesserEquals.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             final Number lhs = Converters.numericValue(evaluationContext, lesserEquals.getLhs(), 0);
             final Number rhs = Converters.numericValue(evaluationContext, lesserEquals.getRhs(), 0);
             return lhs.doubleValue() <= rhs.doubleValue();
@@ -338,10 +318,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(Or or) {
-            val evaluationResult = evaluationCache.get(or.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             boolean lhs = Converters.booleanValue(evaluationContext, or.getLhs(), false);
             boolean rhs = Converters.booleanValue(evaluationContext, or.getRhs(), false);
 
@@ -350,10 +326,6 @@ public class Evaluator {
 
         @Override
         public Boolean visit(Not not) {
-            val evaluationResult = evaluationCache.get(not.toString()).orElse(null);
-            if (evaluationResult != null){
-                return evaluationResult.isMatched();
-            }
             boolean operand = Converters.booleanValue(evaluationContext, not.getOperand(), false);
             return !operand;
         }
