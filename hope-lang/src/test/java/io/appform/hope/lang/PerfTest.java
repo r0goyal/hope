@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.appform.hope.core.Evaluatable;
+import io.appform.hope.core.exceptions.errorstrategy.InjectValueErrorHandlingStrategy;
 import jdk.jfr.consumer.RecordedEvent;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,8 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.results.RunResult;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
@@ -41,8 +44,10 @@ import org.openjdk.jmh.runner.options.TimeValue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -69,16 +74,16 @@ public class PerfTest {
                         " && '/value' > 19 && '/value' < 21" +
                         " && '/value' >=20 && '/value' < 21" +
                         " && '/value' > 11 && '/value' <= 20",
-                "\"$.value\" > 11" +
-                        " && \"$.value\" <30" +
-                        " && \"$.value\" > 19 && \"$.value\" < 21" +
-                        " && \"$.value\" >=20 && \"$.value\" < 21" +
-                        " && \"$.value\" > 11 && \"$.value\" <= 20",
-                "'$.value' > 11" +
-                        " && '$.value' <30" +
-                        " && '$.value' > 19 && '$.value' < 21" +
-                        " && '$.value' >=20 && '$.value' < 21" +
-                        " && '$.value' > 11 && '$.value' <= 20"
+//                "\"$.value\" > 11" +
+//                        " && \"$.value\" <30" +
+//                        " && \"$.value\" > 19 && \"$.value\" < 21" +
+//                        " && \"$.value\" >=20 && \"$.value\" < 21" +
+//                        " && \"$.value\" > 11 && \"$.value\" <= 20",
+//                "'$.value' > 11" +
+//                        " && '$.value' <30" +
+//                        " && '$.value' > 19 && '$.value' < 21" +
+//                        " && '$.value' >=20 && '$.value' < 21" +
+//                        " && '$.value' > 11 && '$.value' <= 20"
         })
         public String payload;
         private JsonNode contextNode;
@@ -97,7 +102,7 @@ public class PerfTest {
     @Test
     public void launchBenchmark() throws Exception {
         Options opt = new OptionsBuilder()
-                .include(this.getClass().getName() + ".*")
+                .include(this.getClass().getName() + ".testPerf")
                 .mode(Mode.Throughput)
                 .timeUnit(TimeUnit.SECONDS)
                 .warmupTime(TimeValue.seconds(2))
@@ -105,7 +110,7 @@ public class PerfTest {
                 .measurementTime(TimeValue.seconds(10))
                 .measurementIterations(1)
                 .threads(2)
-                .forks(1)
+                .forks(0)
                 .shouldFailOnError(true)
                 .shouldDoGC(true)
                 .build();
@@ -116,6 +121,62 @@ public class PerfTest {
     @Benchmark
     public boolean testPerf(BenchmarkState state) {
         return state.hopeLangEngine.evaluate(state.rule, state.contextNode);
+    }
+
+    @Test
+    public void launchBenchmarkV2() throws Exception {
+        Options opt = new OptionsBuilder()
+                .include(this.getClass().getName() + ".testBulkPerfPointer")
+                .mode(Mode.Throughput)
+                .timeUnit(TimeUnit.SECONDS)
+                .warmupTime(TimeValue.seconds(2))
+                .warmupIterations(2)
+                .measurementTime(TimeValue.seconds(5))
+                .measurementIterations(5)
+                .threads(2)
+                .forks(0)
+                .shouldFailOnError(true)
+                .shouldDoGC(true)
+                .build();
+        Collection<RunResult> run = new Runner(opt).run();
+        System.out.println(mapper.writeValueAsString(run.iterator().next().getPrimaryResult()));
+    }
+
+    @State(Scope.Benchmark)
+    public static class BulkBenchmarkStateV2 {
+        public List<Evaluatable> rules;
+        private JsonNode contextNode;
+        private HopeLangEngine hopeLangEngine;
+
+        @Setup(Level.Trial)
+        public void setUp() throws IOException {
+            hopeLangEngine = HopeLangEngine.builder()
+                    .errorHandlingStrategy(new InjectValueErrorHandlingStrategy())
+                    .build();
+            List<String> hopeRules = readAllHopeRulesForJsonPointer();
+            rules = hopeRules.stream()
+                    .map(rule -> hopeLangEngine.parse(rule))
+                    .collect(Collectors.toList());
+            contextNode = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
+        }
+
+        private List<String> readAllHopeRulesForJsonPointer() throws IOException {
+            return Files.readAllLines(Paths.get("src/test/resources/hope_rules_jsonpointer.txt"));
+        }
+    }
+
+    @SneakyThrows
+    @Benchmark
+    public void testBulkPerf(Blackhole blackhole, BulkBenchmarkStateV2 state) {
+        state.rules
+                .forEach(evaluatable ->
+                        blackhole.consume(state.hopeLangEngine.evaluate(evaluatable, state.contextNode)));
+    }
+
+    @SneakyThrows
+    @Benchmark
+    public void testBulkPerfPointer(Blackhole blackhole, BulkBenchmarkStateV2 state) {
+        blackhole.consume(state.hopeLangEngine.evaluateAll(state.rules, state.contextNode));
     }
 
     private static Stream<Arguments> rules() {
@@ -142,13 +203,4 @@ public class PerfTest {
         return eventName.equals(ObjectAllocationOutsideTLAB.EVENT_NAME)
                 || eventName.equals(ObjectAllocationInNewTLAB.EVENT_NAME);
     }
-
-    private List<String> readAllHopeRulesForJsonPointer() throws IOException {
-        return Files.readAllLines(Paths.get("src/test/resources/hope_rules_jsonpointer.txt"));
-    }
-
-    private List<String> readAllHopeRulesForJsonPath() throws IOException {
-        return Files.readAllLines(Paths.get("src/test/resources/hope_rules_jsonpath.txt"));
-    }
-
 }
