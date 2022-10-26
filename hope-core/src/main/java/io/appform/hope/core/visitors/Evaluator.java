@@ -74,8 +74,8 @@ public class Evaluator {
         private final DocumentContext jsonContext;
         private final JsonNode rootNode;
         private final Evaluator evaluator;
-        private final Map<String, JsonNode> jsonPathEvalCache = new HashMap<>(128);
-        private final Map<String, JsonNode> jsonPointerEvalCache = new HashMap<>(128);
+        private final Map<String, JsonNode> jsonPathEvalCache = new HashMap<>(64);
+        private final Map<String, JsonNode> jsonPointerEvalCache = new HashMap<>(64);
     }
 
     public static class LogicEvaluator extends VisitorAdapter<Boolean> {
@@ -96,14 +96,14 @@ public class Evaluator {
         public Boolean visit(AndCombiner andCombiner) {
             return andCombiner.getExpressions()
                     .stream()
-                    .allMatch(expression -> expression.accept(new LogicEvaluator(evaluationContext)));
+                    .allMatch(expression -> expression.accept(this));
         }
 
         @Override
         public Boolean visit(OrCombiner orCombiner) {
             return orCombiner.getExpressions()
                     .stream()
-                    .anyMatch(expression -> expression.accept(new LogicEvaluator(evaluationContext)));
+                    .anyMatch(expression -> expression.accept(this));
         }
 
         @Override

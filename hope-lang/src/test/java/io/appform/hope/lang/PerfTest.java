@@ -14,152 +14,108 @@
 
 package io.appform.hope.lang;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Stopwatch;
-import io.appform.hope.core.exceptions.errorstrategy.InjectValueErrorHandlingStrategy;
-import io.appform.hope.core.functions.FunctionRegistry;
+import io.appform.hope.core.Evaluatable;
 import jdk.jfr.consumer.RecordedEvent;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
-import org.moditect.jfrunit.EnableEvent;
-import org.moditect.jfrunit.JfrEventTest;
-import org.moditect.jfrunit.JfrEvents;
 import org.moditect.jfrunit.events.ObjectAllocationInNewTLAB;
 import org.moditect.jfrunit.events.ObjectAllocationOutsideTLAB;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.openjdk.jmh.runner.options.TimeValue;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Test performance between different constructs
  */
 @Slf4j
-@JfrEventTest
 public class PerfTest {
 
-    final ObjectMapper mapper = new ObjectMapper();
-    final FunctionRegistry functionRegistry;
-    public JfrEvents jfrEvents = new JfrEvents();
+    public static final ObjectMapper mapper = new ObjectMapper();
 
-    PerfTest() {
-        this.functionRegistry = new FunctionRegistry();
-        functionRegistry.discover(Collections.emptyList());
+    public PerfTest() {
+    }
+
+    @State(Scope.Benchmark)
+    public static class BenchmarkState {
+        @Param({
+                "\"/value\" > 11" +
+                        " && \"/value\" <30" +
+                        " && \"/value\" > 19 && \"/value\" < 21" +
+                        " && \"/value\" >=20 && \"/value\" < 21" +
+                        " && \"/value\" > 11 && \"/value\" <= 20",
+                "'/value' > 11" +
+                        " && '/value' <30" +
+                        " && '/value' > 19 && '/value' < 21" +
+                        " && '/value' >=20 && '/value' < 21" +
+                        " && '/value' > 11 && '/value' <= 20",
+                "\"$.value\" > 11" +
+                        " && \"$.value\" <30" +
+                        " && \"$.value\" > 19 && \"$.value\" < 21" +
+                        " && \"$.value\" >=20 && \"$.value\" < 21" +
+                        " && \"$.value\" > 11 && \"$.value\" <= 20",
+                "'$.value' > 11" +
+                        " && '$.value' <30" +
+                        " && '$.value' > 19 && '$.value' < 21" +
+                        " && '$.value' >=20 && '$.value' < 21" +
+                        " && '$.value' > 11 && '$.value' <= 20"
+        })
+        public String payload;
+        private JsonNode contextNode;
+        private Evaluatable rule;
+        private HopeLangEngine hopeLangEngine;
+
+        @Setup(Level.Trial)
+        public void setUp() throws JsonProcessingException {
+            hopeLangEngine = HopeLangEngine.builder()
+                    .build();
+            rule = hopeLangEngine.parse(payload);
+            contextNode = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
+        }
     }
 
     @Test
-    @EnableEvent(ObjectAllocationOutsideTLAB.EVENT_NAME)
-    @EnableEvent(ObjectAllocationInNewTLAB.EVENT_NAME)
-    public void benchmarkEvalJsonPointerMemory() throws IOException {
-        int numIterations = 10_000;
-        final HopeLangEngine hopeLangEngine = HopeLangEngine.builder()
-                .errorHandlingStrategy(new InjectValueErrorHandlingStrategy())
+    public void launchBenchmark() throws Exception {
+        Options opt = new OptionsBuilder()
+                .include(this.getClass().getName() + ".*")
+                .mode(Mode.Throughput)
+                .timeUnit(TimeUnit.SECONDS)
+                .warmupTime(TimeValue.seconds(2))
+                .warmupIterations(2)
+                .measurementTime(TimeValue.seconds(10))
+                .measurementIterations(1)
+                .threads(2)
+                .forks(1)
+                .shouldFailOnError(true)
+                .shouldDoGC(true)
                 .build();
-        val jsonNode = mapper.createObjectNode()
-                .put("instrument", "UPI")
-                .put("providerId", "X")
-                .put("providerType", "A")
-                .put("providerRole", "RECEIVER");
-        val hopeRules = readAllHopeRulesForJsonPointer();
-        val evaluatables = hopeRules.stream()
-                .map(hopeLangEngine::parse)
-                .toList();
-        jfrEvents.reset();
-        /*
-        First run some iterations to ensure all internal static memory allocations have happened
-         */
-        IntStream.range(0, numIterations)
-                .forEach(value -> evaluatables.forEach(evaluatable -> hopeLangEngine.evaluate(evaluatable, jsonNode)));
-        jfrEvents.reset();
-
-        IntStream.range(0, numIterations)
-                .forEach(value -> evaluatables.forEach(evaluatable -> hopeLangEngine.evaluate(evaluatable, jsonNode)));
-        jfrEvents.awaitEvents();
-
-        long memoryAllocated = jfrEvents
-                .filter(this::isMemoryAllocationEvent)
-                .mapToLong(this::getAllocationSize)
-                .sum();
-        System.out.println("Total memory allocated: " + memoryAllocated);
-        /*
-        Each run on an average takes less than 175 KB and more than 160 KB as per the perf test
-         */
-        assertTrue(memoryAllocated < numIterations * 175 * 1024L);
-        assertTrue(memoryAllocated > numIterations * 160 * 1024L);
+        new Runner(opt).run();
     }
 
-    @Test
-    @EnableEvent(ObjectAllocationOutsideTLAB.EVENT_NAME)
-    @EnableEvent(ObjectAllocationInNewTLAB.EVENT_NAME)
-    public void benchmarkEvalJsonPathMemory() throws IOException {
-        int numIterations = 10_000;
-        final HopeLangEngine hopeLangEngine = HopeLangEngine.builder()
-                .errorHandlingStrategy(new InjectValueErrorHandlingStrategy())
-                .build();
-        val jsonNode = mapper.createObjectNode()
-                .put("instrument", "UPI")
-                .put("providerId", "X")
-                .put("providerType", "A")
-                .put("providerRole", "RECEIVER");
-        val hopeRules = readAllHopeRulesForJsonPath();
-        val evaluatables = hopeRules.stream()
-                .map(hopeLangEngine::parse)
-                .toList();
-        jfrEvents.reset();
-        /*
-        First run some iterations to ensure all internal static memory allocations have happened
-         */
-        IntStream.range(0, numIterations)
-                .forEach(value -> evaluatables.forEach(evaluatable -> hopeLangEngine.evaluate(evaluatable, jsonNode)));
-        jfrEvents.reset();
-
-        IntStream.range(0, numIterations)
-                .forEach(value -> evaluatables.forEach(evaluatable -> hopeLangEngine.evaluate(evaluatable, jsonNode)));
-        jfrEvents.awaitEvents();
-
-        long memoryAllocated = jfrEvents
-                .filter(this::isMemoryAllocationEvent)
-                .mapToLong(this::getAllocationSize)
-                .sum();
-        System.out.println("Total memory allocated: " + memoryAllocated);
-        /*
-        Each run on an average takes less than 175 KB and more than 160 KB as per the perf test
-         */
-        assertTrue(memoryAllocated < numIterations * 800 * 1024L);
-        assertTrue(memoryAllocated > numIterations * 750 * 1024L);
-    }
-
-    @ParameterizedTest
-    @MethodSource("rules")
     @SneakyThrows
-    void testPerf(final String payload) {
-        val node = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
-
-        final HopeLangEngine hopeLangParser = HopeLangEngine.builder()
-                .build();
-
-        val rule = hopeLangParser.parse(payload);
-
-        IntStream.range(0, 10)
-                .forEach(times -> {
-                    Stopwatch stopwatch = Stopwatch.createStarted();
-                    IntStream.range(1, 1_000_000)
-                            .forEach(i -> hopeLangParser.evaluate(rule, node));
-                    log.info("Time taken for one million evals: {}", stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                });
-        assertTrue(true);
+    @Benchmark
+    public boolean testPerf(BenchmarkState state) {
+        return state.hopeLangEngine.evaluate(state.rule, state.contextNode);
     }
 
     private static Stream<Arguments> rules() {
@@ -169,21 +125,9 @@ public class PerfTest {
                         " && \"/value\" > 19 && \"/value\" < 21" +
                         " && \"/value\" >=20 && \"/value\" < 21" +
                         " && \"/value\" > 11 && \"/value\" <= 20"),
-                Arguments.of("\"$.value\" > 11" +
-                        " && \"$.value\" <30" +
-                        " && \"$.value\" > 19 && \"$.value\" < 21" +
-                        " && \"$.value\" >=20 && \"$.value\" < 21" +
-                        " && \"$.value\" > 11 && \"$.value\" <= 20"),
-                Arguments.of("'/value' > 11" +
-                        " && '/value' <30" +
-                        " && '/value' > 19 && '/value' < 21" +
-                        " && '/value' >=20 && '/value' < 21" +
-                        " && '/value' > 11 && '/value' <= 20"),
-                Arguments.of("'$.value' > 11" +
-                        " && '$.value' <30" +
-                        " && '$.value' > 19 && '$.value' < 21" +
-                        " && '$.value' >=20 && '$.value' < 21" +
-                        " && '$.value' > 11 && '$.value' <= 20")
+                Arguments.of(),
+                Arguments.of(),
+                Arguments.of()
         );
     }
 
