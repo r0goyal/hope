@@ -624,7 +624,7 @@ public class Converters {
         final Map<String, JsonNode> jsonPathEvalCache = evaluationContext.getJsonPathEvalCache();
         return jsonPathEvalCache
                 .computeIfAbsent(path, key -> {
-                    final JsonNode value = evaluationContext.getJsonContext().read(path);
+                    final JsonNode value = evaluationContext.getJsonContext().read(jsonPathValue.getJsonPath());
                     return null == value
                            ? NullNode.getInstance()
                            : value;
@@ -636,13 +636,13 @@ public class Converters {
             Evaluator.EvaluationContext evaluationContext) {
         final String pointer = jsonPathValue.getPointer();
         final Map<String, JsonNode> jsonPointerEvalCache = evaluationContext.getJsonPointerEvalCache();
-        return jsonPointerEvalCache
-                .computeIfAbsent(pointer, key -> {
-                    final JsonNode value = evaluationContext.getRootNode().at(pointer);
+//        return jsonPointerEvalCache
+//                .computeIfAbsent(pointer, key -> {
+                    final JsonNode value = evaluationContext.getRootNode().at(jsonPathValue.getJsonPointer());
                     return null == value
                            ? NullNode.getInstance()
                            : value;
-                });
+//                });
     }
 
     private static <T> T extractNodeValue(

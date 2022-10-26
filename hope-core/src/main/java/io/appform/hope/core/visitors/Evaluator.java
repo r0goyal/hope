@@ -31,10 +31,13 @@ import io.appform.hope.core.values.JsonPointerValue;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
+import lombok.val;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Evaluates a hope expression
@@ -68,14 +71,21 @@ public class Evaluator {
         return evaluatable.accept(new LogicEvaluator(new EvaluationContext(parseContext.parse(node), node,this)));
     }
 
+    public List<Boolean> evaluateAll(List<Evaluatable> evaluatables, JsonNode node) {
+        val logicEvaluator = new LogicEvaluator(new EvaluationContext(parseContext.parse(node), node,this));
+        return evaluatables.stream()
+                .map(evaluatable -> evaluatable.accept(logicEvaluator))
+                .collect(Collectors.toList());
+    }
+
     @Data
     @Builder
     public static class EvaluationContext {
         private final DocumentContext jsonContext;
         private final JsonNode rootNode;
         private final Evaluator evaluator;
-        private final Map<String, JsonNode> jsonPathEvalCache = new HashMap<>(128);
-        private final Map<String, JsonNode> jsonPointerEvalCache = new HashMap<>(128);
+        private final Map<String, JsonNode> jsonPathEvalCache = new HashMap<>(64);
+        private final Map<String, JsonNode> jsonPointerEvalCache = new HashMap<>(64);
     }
 
     public static class LogicEvaluator extends VisitorAdapter<Boolean> {
@@ -94,16 +104,26 @@ public class Evaluator {
 
         @Override
         public Boolean visit(AndCombiner andCombiner) {
-            return andCombiner.getExpressions()
-                    .stream()
-                    .allMatch(expression -> expression.accept(new LogicEvaluator(evaluationContext)));
+            for (Evaluatable evaluatable : andCombiner.getExpressions()){
+                boolean result = evaluatable.accept(this);
+                if (!result){
+                    return false;
+                }
+            }
+            return true;
+
+
+
+//            return andCombiner.getExpressions()
+//                    .stream()
+//                    .allMatch(expression -> expression.accept(this));
         }
 
         @Override
         public Boolean visit(OrCombiner orCombiner) {
             return orCombiner.getExpressions()
                     .stream()
-                    .anyMatch(expression -> expression.accept(new LogicEvaluator(evaluationContext)));
+                    .anyMatch(expression -> expression.accept(this));
         }
 
         @Override

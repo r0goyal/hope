@@ -85,6 +85,10 @@ public class HopeLangEngine {
         return new Evaluator(errorHandlingStrategy).evaluate(rule, node);
     }
 
+    public List<Boolean> evaluateAll(List<Evaluatable> rules, JsonNode node) {
+        return new Evaluator(errorHandlingStrategy).evaluateAll(rules, node);
+    }
+
     public static class Builder {
         private final List<String> userPackages = new ArrayList<>();
         private final FunctionRegistry functionRegistry = new FunctionRegistry();

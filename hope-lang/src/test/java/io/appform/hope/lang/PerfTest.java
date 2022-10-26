@@ -14,85 +14,193 @@
 
 package io.appform.hope.lang;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.google.common.base.Stopwatch;
-import io.appform.hope.core.functions.FunctionRegistry;
+import io.appform.hope.core.Evaluatable;
+import io.appform.hope.core.exceptions.errorstrategy.InjectValueErrorHandlingStrategy;
+import jdk.jfr.consumer.RecordedEvent;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
-import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.moditect.jfrunit.events.ObjectAllocationInNewTLAB;
+import org.moditect.jfrunit.events.ObjectAllocationOutsideTLAB;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.results.RunResult;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.openjdk.jmh.runner.options.TimeValue;
 
-import java.util.Collections;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Test performance between different constructs
  */
 @Slf4j
-class PerfTest {
+public class PerfTest {
 
-    final ObjectMapper mapper = new ObjectMapper();
+    public static final ObjectMapper mapper = new ObjectMapper();
 
-    final JsonNode node = NullNode.getInstance();
-    final FunctionRegistry functionRegistry;
-
-    PerfTest() {
-        this.functionRegistry = new FunctionRegistry();
-        functionRegistry.discover(Collections.emptyList());
+    public PerfTest() {
     }
 
-    @ParameterizedTest
-    @MethodSource("rules")
-    @SneakyThrows
-    void testPerf(final String payload) {
-        val node = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
+    @State(Scope.Benchmark)
+    public static class BenchmarkState {
+        @Param({
+                "\"/value\" > 11" +
+                        " && \"/value\" <30" +
+                        " && \"/value\" > 19 && \"/value\" < 21" +
+                        " && \"/value\" >=20 && \"/value\" < 21" +
+                        " && \"/value\" > 11 && \"/value\" <= 20",
+                "'/value' > 11" +
+                        " && '/value' <30" +
+                        " && '/value' > 19 && '/value' < 21" +
+                        " && '/value' >=20 && '/value' < 21" +
+                        " && '/value' > 11 && '/value' <= 20",
+//                "\"$.value\" > 11" +
+//                        " && \"$.value\" <30" +
+//                        " && \"$.value\" > 19 && \"$.value\" < 21" +
+//                        " && \"$.value\" >=20 && \"$.value\" < 21" +
+//                        " && \"$.value\" > 11 && \"$.value\" <= 20",
+//                "'$.value' > 11" +
+//                        " && '$.value' <30" +
+//                        " && '$.value' > 19 && '$.value' < 21" +
+//                        " && '$.value' >=20 && '$.value' < 21" +
+//                        " && '$.value' > 11 && '$.value' <= 20"
+        })
+        public String payload;
+        private JsonNode contextNode;
+        private Evaluatable rule;
+        private HopeLangEngine hopeLangEngine;
 
-        final HopeLangEngine hopeLangParser = HopeLangEngine.builder()
+        @Setup(Level.Trial)
+        public void setUp() throws JsonProcessingException {
+            hopeLangEngine = HopeLangEngine.builder()
+                    .build();
+            rule = hopeLangEngine.parse(payload);
+            contextNode = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
+        }
+    }
+
+    @Test
+    public void launchBenchmark() throws Exception {
+        Options opt = new OptionsBuilder()
+                .include(this.getClass().getName() + ".testPerf")
+                .mode(Mode.Throughput)
+                .timeUnit(TimeUnit.SECONDS)
+                .warmupTime(TimeValue.seconds(2))
+                .warmupIterations(2)
+                .measurementTime(TimeValue.seconds(10))
+                .measurementIterations(1)
+                .threads(2)
+                .forks(0)
+                .shouldFailOnError(true)
+                .shouldDoGC(true)
                 .build();
+        new Runner(opt).run();
+    }
 
-        val rule = hopeLangParser.parse(payload);
+    @SneakyThrows
+    @Benchmark
+    public boolean testPerf(BenchmarkState state) {
+        return state.hopeLangEngine.evaluate(state.rule, state.contextNode);
+    }
 
-        IntStream.range(0, 10)
-                .forEach(times -> {
-                    Stopwatch stopwatch = Stopwatch.createStarted();
-                    IntStream.range(1, 1_000_000)
-                            .forEach(i -> hopeLangParser.evaluate(rule, node));
-                    log.info("Time taken for one million evals: {}", stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                });
-        assertTrue(true);
+    @Test
+    public void launchBenchmarkV2() throws Exception {
+        Options opt = new OptionsBuilder()
+                .include(this.getClass().getName() + ".testBulkPerfPointer")
+                .mode(Mode.Throughput)
+                .timeUnit(TimeUnit.SECONDS)
+                .warmupTime(TimeValue.seconds(2))
+                .warmupIterations(2)
+                .measurementTime(TimeValue.seconds(5))
+                .measurementIterations(5)
+                .threads(2)
+                .forks(0)
+                .shouldFailOnError(true)
+                .shouldDoGC(true)
+                .build();
+        Collection<RunResult> run = new Runner(opt).run();
+        System.out.println(mapper.writeValueAsString(run.iterator().next().getPrimaryResult()));
+    }
+
+    @State(Scope.Benchmark)
+    public static class BulkBenchmarkStateV2 {
+        public List<Evaluatable> rules;
+        private JsonNode contextNode;
+        private HopeLangEngine hopeLangEngine;
+
+        @Setup(Level.Trial)
+        public void setUp() throws IOException {
+            hopeLangEngine = HopeLangEngine.builder()
+                    .errorHandlingStrategy(new InjectValueErrorHandlingStrategy())
+                    .build();
+            List<String> hopeRules = readAllHopeRulesForJsonPointer();
+            rules = hopeRules.stream()
+                    .map(rule -> hopeLangEngine.parse(rule))
+                    .collect(Collectors.toList());
+            contextNode = mapper.readTree("{ \"value\": 20, \"string\" : \"Hello\" }");
+        }
+
+        private List<String> readAllHopeRulesForJsonPointer() throws IOException {
+            return Files.readAllLines(Paths.get("src/test/resources/hope_rules_jsonpointer.txt"));
+        }
+    }
+
+    @SneakyThrows
+    @Benchmark
+    public void testBulkPerf(Blackhole blackhole, BulkBenchmarkStateV2 state) {
+        state.rules
+                .forEach(evaluatable ->
+                        blackhole.consume(state.hopeLangEngine.evaluate(evaluatable, state.contextNode)));
+    }
+
+    @SneakyThrows
+    @Benchmark
+    public void testBulkPerfPointer(Blackhole blackhole, BulkBenchmarkStateV2 state) {
+        blackhole.consume(state.hopeLangEngine.evaluateAll(state.rules, state.contextNode));
     }
 
     private static Stream<Arguments> rules() {
         return Stream.of(
                 Arguments.of("\"/value\" > 11" +
-                                     " && \"/value\" <30" +
-                                     " && \"/value\" > 19 && \"/value\" < 21" +
-                                     " && \"/value\" >=20 && \"/value\" < 21" +
-                                     " && \"/value\" > 11 && \"/value\" <= 20"),
-                Arguments.of("\"$.value\" > 11" +
-                                     " && \"$.value\" <30" +
-                                     " && \"$.value\" > 19 && \"$.value\" < 21" +
-                                     " && \"$.value\" >=20 && \"$.value\" < 21" +
-                                     " && \"$.value\" > 11 && \"$.value\" <= 20"),
-                Arguments.of("'/value' > 11" +
-                                     " && '/value' <30" +
-                                     " && '/value' > 19 && '/value' < 21" +
-                                     " && '/value' >=20 && '/value' < 21" +
-                                     " && '/value' > 11 && '/value' <= 20"),
-                Arguments.of("'$.value' > 11" +
-                                     " && '$.value' <30" +
-                                     " && '$.value' > 19 && '$.value' < 21" +
-                                     " && '$.value' >=20 && '$.value' < 21" +
-                                     " && '$.value' > 11 && '$.value' <= 20")
-                        );
+                        " && \"/value\" <30" +
+                        " && \"/value\" > 19 && \"/value\" < 21" +
+                        " && \"/value\" >=20 && \"/value\" < 21" +
+                        " && \"/value\" > 11 && \"/value\" <= 20"),
+                Arguments.of(),
+                Arguments.of(),
+                Arguments.of()
+        );
+    }
+
+    private long getAllocationSize(final RecordedEvent recordedEvent) {
+        return recordedEvent.getEventType().getName().equals(ObjectAllocationInNewTLAB.EVENT_NAME) ?
+                recordedEvent.getLong(ObjectAllocationInNewTLAB.TLAB_SIZE.getName()) :
+                recordedEvent.getLong(ObjectAllocationOutsideTLAB.ALLOCATION_SIZE.getName());
+    }
+
+    private boolean isMemoryAllocationEvent(final RecordedEvent recordedEvent) {
+        val eventName = recordedEvent.getEventType().getName();
+        return eventName.equals(ObjectAllocationOutsideTLAB.EVENT_NAME)
+                || eventName.equals(ObjectAllocationInNewTLAB.EVENT_NAME);
     }
 }
